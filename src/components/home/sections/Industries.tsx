@@ -1,17 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import {
-  AnimatePresence,
-  motion,
-  useInView,
-  useReducedMotion,
-  useScroll,
-  useSpring,
-  useTransform,
-} from "framer-motion";
+import { motion, useInView, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import {
   FiArrowRight,
   FiBookOpen,
@@ -24,17 +16,16 @@ import {
 import type { IconType } from "react-icons";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-const CYCLE = 6000;
-
-/* Temporary: using the same image for all */
-const IMG = "/images/Image1.webp";
+const CYCLE = 5500;
 
 type Industry = {
   id: string;
   label: string;
   desc: string;
   href: string;
+  image: string;
   icon: IconType;
+  accent: string;
 };
 
 const INDUSTRIES: Industry[] = [
@@ -43,101 +34,253 @@ const INDUSTRIES: Industry[] = [
     label: "Online stores",
     desc: "Answer questions about delivery, returns and store policies, so shoppers do not leave with a question unanswered.",
     href: "/solutions/ecommerce",
+    image: "/images/LiveChatEcommerce.webp",
     icon: FiShoppingCart,
+    accent: "#73C311",
   },
   {
     id: "saas",
     label: "SaaS and apps",
     desc: "Help visitors compare plans, answer setup questions and pass trial users to your team.",
     href: "/solutions/saas",
+    image: "/images/SaasHero.webp",
     icon: FiMonitor,
+    accent: "#58a600",
   },
   {
     id: "service",
     label: "Service businesses",
     desc: "Reply to enquiries about prices, availability and booking, even outside office hours.",
     href: "/solutions/service-businesses",
+    image: "/images/ProfessionalServicesHero.webp",
     icon: FiTool,
+    accent: "#73C311",
   },
   {
     id: "health",
     label: "Healthcare",
     desc: "Handle non-clinical questions about hours, locations and appointments. Not for medical advice.",
     href: "/solutions/healthcare",
+    image: "/images/LiveChatHealtcareHero.webp",
     icon: FiHeart,
+    accent: "#4d9400",
   },
   {
     id: "edu",
     label: "Education",
     desc: "Help students and parents with courses, admissions and fees.",
     href: "/solutions/education",
+    image: "/images/EducationHero.webp",
     icon: FiBookOpen,
+    accent: "#73C311",
   },
   {
     id: "realestate",
     label: "Real estate",
     desc: "Reply to property enquiries quickly and pass serious leads to an agent.",
     href: "/solutions/real-estate",
+    image: "/images/EstateHero.webp",
     icon: FiHome,
+    accent: "#58a600",
   },
 ];
 
-const MARQUEE_ITEMS = [...INDUSTRIES, ...INDUSTRIES, ...INDUSTRIES];
+const N = INDUSTRIES.length;
+const GAP = 40;
+const SIDE = 0.88;
+const TILT = 5;
+const ROLL = 2;
+
+const clamp = (v: number, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const wrap = (i: number) => ((i % N) + N) % N;
+const circDist = (a: number, b: number) => {
+  let d = (((a - b) % N) + N) % N;
+  if (d >= N / 2) d -= N;
+  return d;
+};
+const damp = (c: number, t: number, l: number, dt: number) => c + (t - c) * (1 - Math.exp(-l * dt));
 
 export default function Industries() {
   const reduce = !!useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLElement | null)[]>([]);
+  const pillRef = useRef<HTMLDivElement>(null);
+  const pillTextRef = useRef<HTMLSpanElement>(null);
+
+  const activeRef = useRef(0);
+  const targetRef = useRef(0);
+  const visibleRef = useRef(false);
+  const lockRef = useRef(false);
+  const swipeRef = useRef<number | null>(null);
+
   const inView = useInView(sectionRef, { amount: 0.2 });
-
   const [active, setActive] = useState(0);
-  const [manual, setManual] = useState(false);
-  
 
-  const running = inView && !manual && !reduce;
+  const lock = () => {
+    lockRef.current = true;
+    window.setTimeout(() => {
+      lockRef.current = false;
+    }, 6000);
+  };
 
-  useEffect(() => {
-    if (!running) return;
-    const t = setTimeout(() => setActive((a) => (a + 1) % INDUSTRIES.length), CYCLE);
-    return () => clearTimeout(t);
-  }, [active, running]);
+  const step = (dir: 1 | -1, user = true) => {
+    if (user) lock();
+    targetRef.current = Math.round(targetRef.current) + dir;
+  };
 
-  const pick = (i: number) => {
-    setActive(i);
-    setManual(true);
-    // Resume auto-play shortly after the user clicks
-    setTimeout(() => setManual(false), CYCLE + 1000);
+  const goTo = (i: number) => {
+    lock();
+    targetRef.current = Math.round(targetRef.current) + circDist(i, Math.round(targetRef.current));
   };
 
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ["start end", "end start"] });
   const bgY = useTransform(scrollYProgress, [0, 1], ["-12%", "12%"]);
   const waveX = useTransform(scrollYProgress, [0, 1], [-40, 40]);
 
-  const rawTiltX = useSpring(0, { stiffness: 220, damping: 24 });
-  const rawTiltY = useSpring(0, { stiffness: 220, damping: 24 });
+  useEffect(() => {
+    const fine = window.matchMedia("(pointer: fine)").matches;
+    let raf = 0;
+    let last = performance.now();
+    let v = 0;
+    let cw = 760;
+    let ch = 410;
+    let px = -200;
+    let py = -200;
+    let mx = -200;
+    let my = -200;
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (reduce) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width - 0.5;
-    const y = (e.clientY - rect.top) / rect.height - 0.5;
-    rawTiltY.set(x * 9);
-    rawTiltX.set(y * -9);
+    const layout = () => {
+      const vw = window.innerWidth;
+      const mobile = vw < 768;
+      cw = mobile ? Math.max(280, Math.min(vw * 0.88, 420)) : Math.max(540, Math.min(vw * 0.62, 920));
+      ch = mobile ? 420 : 410;
+
+      if (stageRef.current) {
+        stageRef.current.style.height = `${ch + 28}px`;
+      }
+
+      cardRefs.current.forEach((el) => {
+        if (!el) return;
+        el.style.width = `${cw}px`;
+        el.style.height = `${ch}px`;
+      });
+    };
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      v = damp(v, targetRef.current, reduce ? 100 : 5.5, dt);
+
+      const inner = (cw * (1 + SIDE)) / 2 + GAP;
+
+      cardRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const d = circDist(i, v);
+        const ad = Math.abs(d);
+        const k = Math.min(1, ad);
+        const x = Math.sign(d) * (ad <= 1 ? ad * inner : inner + (ad - 1) * (cw * SIDE + GAP));
+        const sc = 1 - (1 - SIDE) * k;
+        const ry = clamp(d, -1, 1) * TILT;
+        const rz = clamp(d, -1, 1) * ROLL;
+
+        el.style.transform = `translate3d(calc(-50% + ${x}px),0,0) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${sc})`;
+        el.style.filter = `brightness(${(1 - 0.16 * k).toFixed(3)})`;
+        el.style.opacity = String(clamp(1 - 0.35 * k, 0.45, 1));
+        el.style.visibility = ad > 1.7 ? "hidden" : "visible";
+        el.style.zIndex = String(10 - Math.round(ad * 3));
+        el.dataset.side = ad > 0.5 ? "true" : "false";
+      });
+
+      const idx = wrap(Math.round(v));
+      if (idx !== activeRef.current) {
+        activeRef.current = idx;
+        setActive(idx);
+      }
+
+      if (fine && pillRef.current) {
+        px += (mx - px) * 0.25;
+        py += (my - py) * 0.25;
+        pillRef.current.style.transform = `translate3d(${px}px,${py}px,0) translate(-50%,-50%)`;
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!fine) return;
+      mx = e.clientX;
+      my = e.clientY;
+      const t = e.target as Element | null;
+      const card = t?.closest?.("[data-ind-card]") as HTMLElement | null;
+      const text = pillTextRef.current;
+      if (!text) return;
+
+      if (card) {
+        const d = circDist(Number(card.dataset.indCard), v);
+        if (Math.abs(d) > 0.5) {
+          text.textContent = d < 0 ? "Previous" : "Next";
+          text.dataset.on = "true";
+          return;
+        }
+      }
+      text.dataset.on = "false";
+    };
+
+    const hidePill = () => {
+      if (pillTextRef.current) pillTextRef.current.dataset.on = "false";
+    };
+
+    const auto = window.setInterval(() => {
+      if (!visibleRef.current || lockRef.current || reduce || !inView) return;
+      step(1, false);
+    }, CYCLE);
+
+    const io = new IntersectionObserver(
+      ([en]) => {
+        visibleRef.current = en.isIntersecting;
+      },
+      { threshold: 0.25 }
+    );
+    if (sectionRef.current) io.observe(sectionRef.current);
+
+    layout();
+    window.addEventListener("resize", layout);
+    window.addEventListener("pointermove", onMove, { passive: true });
+    sectionRef.current?.addEventListener("pointerleave", hidePill);
+    raf = requestAnimationFrame(tick);
+
+    const sec = sectionRef.current;
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearInterval(auto);
+      io.disconnect();
+      window.removeEventListener("resize", layout);
+      window.removeEventListener("pointermove", onMove);
+      sec?.removeEventListener("pointerleave", hidePill);
+    };
+  }, [inView, reduce]);
+
+  const onCardClick = (i: number) => {
+    if (i !== activeRef.current) goTo(i);
   };
-
-  const handleMouseLeave = () => {
-    rawTiltX.set(0);
-    rawTiltY.set(0);
-  };
-
-  const ind = INDUSTRIES[active];
-  const ActiveIcon = ind.icon;
 
   return (
     <section
       ref={sectionRef}
-      className="relative w-full overflow-hidden bg-[var(--bg-color)] pt-14 text-[var(--dark-text)] sm:pt-20"
+      className="relative w-full overflow-hidden bg-[var(--bg-color)] pt-14 pb-8 text-[var(--dark-text)] sm:pt-20 sm:pb-10"
     >
-      {/* Subtle Light Backdrop with Scroll-Driven Signal Wave */}
+      <style>{`
+        .ind-pill { transform: scale(0); opacity: 0; transition: transform .25s cubic-bezier(.2,.8,.2,1), opacity .2s; }
+        .ind-pill[data-on="true"] { transform: scale(1); opacity: 1; }
+        .ind-card[data-side="true"] { cursor: none; }
+        @media (pointer: coarse) {
+          .ind-pill-wrap { display: none !important; }
+          .ind-card[data-side="true"] { cursor: pointer; }
+        }
+      `}</style>
+
+      {/* Keep original light background & subtle signal wave */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <motion.div
           style={reduce ? undefined : { y: bgY }}
@@ -186,9 +329,9 @@ export default function Industries() {
           <span className="mb-2.5 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--main-green)]">
             <span className="h-px w-6 bg-[var(--main-green)]" /> Who it is for
           </span>
-          <h2 className="text-2xl font-bold leading-[1.12] tracking-tight text-[var(--dark-text)] sm:text-4xl lg:text-[2.6rem]">
+          <h2 className="text-2xl cursor-scan-effect font-bold leading-[1.12] tracking-tight text-[var(--dark-text)] sm:text-4xl lg:text-[2.6rem]">
             Live Chat and AI Support for Every{" "}
-            <span className="inline-block rounded-md  px-2 text-[var(--dark-text)]">
+            <span className="inline-block rounded-md px-2 text-[var(--dark-text)]">
               Kind of Business
             </span>
           </h2>
@@ -197,229 +340,105 @@ export default function Industries() {
           </p>
         </motion.div>
 
-        {/* Full-Width Open Layout (No Restrictive Inner Box) */}
-        <div className="mx-auto mb-10 grid w-full max-w-7xl grid-cols-1 items-center gap-6 px-4 sm:mb-12 sm:gap-8 sm:px-6 md:grid-cols-12 lg:gap-12 lg:px-10">
-             {/* Left: Active Industry Card */}
-          <div className="relative z-10 order-2 md:order-1 md:col-span-5 [perspective:1000px]">
-            <AnimatePresence mode="wait">
-              <motion.div
+        {/* 3D Perspective Carousel Stage */}
+        <div
+          ref={stageRef}
+          className="relative mx-auto mb-10 w-full max-w-7xl [perspective:1800px] [touch-action:pan-y] sm:mb-12"
+          onPointerDown={(e) => {
+            swipeRef.current = e.clientX;
+          }}
+          onPointerUp={(e) => {
+            if (swipeRef.current === null) return;
+            const dx = e.clientX - swipeRef.current;
+            swipeRef.current = null;
+            if (Math.abs(dx) > 60) step(dx < 0 ? 1 : -1);
+          }}
+        >
+          {INDUSTRIES.map((ind, i) => {
+            const on = active === i;
+            const Icon = ind.icon;
+
+            return (
+              <article
                 key={ind.id}
-                initial={reduce ? false : { opacity: 0, x: -24, filter: "blur(6px)" }}
-                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-                exit={reduce ? undefined : { opacity: 0, x: 24, filter: "blur(6px)" }}
-                transition={{ duration: 0.42, ease: EASE }}
-                onMouseMove={(e) => {
-                  if (reduce) return;
-                  const r = e.currentTarget.getBoundingClientRect();
-                  const x = (e.clientX - r.left) / r.width - 0.5;
-                  const y = (e.clientY - r.top) / r.height - 0.5;
-                  e.currentTarget.style.setProperty("--rx", `${y * -8}deg`);
-                  e.currentTarget.style.setProperty("--ry", `${x * 8}deg`);
-                  e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
-                  e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+                ref={(el) => {
+                  cardRefs.current[i] = el;
                 }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.setProperty("--rx", "0deg");
-                  e.currentTarget.style.setProperty("--ry", "0deg");
+                data-ind-card={i}
+                data-side="false"
+                onClick={() => onCardClick(i)}
+                className="ind-card absolute bottom-3 left-1/2 flex select-none flex-col overflow-hidden rounded-3xl border bg-[var(--color-primary)] will-change-transform [transform-origin:50%_100%] transition-[border-color,box-shadow] duration-300 md:bottom-6 md:flex-row"
+                style={{
+                  borderColor: on ? ind.accent : "var(--borders-color)",
+                  boxShadow: on
+                    ? "0 24px 60px -24px rgba(115, 195, 17, 0.28)"
+                    : "0 14px 35px -24px rgba(0, 0, 0, 0.12)",
                 }}
-                style={{ transform: "rotateX(var(--rx, 0)) rotateY(var(--ry, 0))", transformStyle: "preserve-3d", transition: "transform 0.25s ease-out" }}
-                className="group relative overflow-hidden rounded-3xl border border-[var(--borders-color)] bg-[var(--color-primary)] p-6 shadow-[0_20px_45px_-24px_rgba(0,0,0,0.08)] transition-shadow duration-500 hover:shadow-[0_30px_60px_-25px_rgba(115,195,17,0.35)] sm:p-8"
               >
-                {/* Spotlight glow that follows the cursor */}
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-                  style={{
-                    background: "radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(185,250,106,0.18), transparent 60%)",
-                  }}
-                />
-
-                {/* Animated gradient border on hover */}
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-                  style={{
-                    background: "linear-gradient(135deg, var(--main-light-green), transparent 40%, transparent 60%, var(--main-green))",
-                    padding: "1px",
-                    WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
-                    WebkitMaskComposite: "xor",
-                    maskComposite: "exclude",
-                  }}
-                />
-
-                <div className="relative mb-5 flex items-center justify-between">
-                  {/* Magnetic Floating Icon with Pulse Ring */}
-                  <motion.div 
-                    className="relative"
-                    whileHover={{ scale: 1.1, rotate: -5 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 15 }}
-                  >
-                    {/* Pulsing ring behind icon */}
-                    <motion.span 
-                      className="absolute inset-0 rounded-2xl border-2 border-[var(--main-green)]"
-                      animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0, 0.5] }}
-                      transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                    />
-                    <span className="relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--light-green)] text-xl text-[var(--dark-text)] overflow-hidden sm:h-14 sm:w-14 sm:text-2xl">
-                      {/* Shimmer sweep across the icon block */}
-                      <span
-                        aria-hidden
-                        className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/60 to-transparent transition-transform duration-700 group-hover:translate-x-full"
-                      />
-                      <ActiveIcon className="relative" />
-                    </span>
-                  </motion.div>
-
-                  {/* Animated Dotted Accent */}
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <motion.span
-                        key={i}
-                        className="h-1.5 w-1.5 rounded-full bg-[var(--main-green)]"
-                        animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.2, 0.8] }}
-                        transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
-                      />
-                    ))}
-                  </div>
+                {/* Left Image */}
+                <div className="relative h-[42%] w-full shrink-0 overflow-hidden bg-[var(--bg-light)] md:h-full md:w-[46%]">
+                  <Image
+                    src={ind.image}
+                    alt={ind.label}
+                    fill
+                    sizes="(min-width: 768px) 420px, 90vw"
+                    className="object-cover"
+                    draggable={false}
+                  />
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent"
+                  />
                 </div>
 
-                {/* Staggered Word-by-Word Title Reveal */}
-                <h3 className="relative text-2xl font-bold leading-tight tracking-tight text-[var(--dark-text)] sm:text-3xl">
-                  {ind.label.split(" ").map((word, i) => (
-                    <motion.span
-                      key={`${ind.id}-${word}`}
-                      initial={reduce ? false : { opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.4, delay: i * 0.08, ease: EASE }}
-                      className="inline-block mr-2"
+                {/* Right Content */}
+                <div className="flex min-h-0 flex-1 flex-col justify-between p-5 sm:p-6 md:p-8">
+                  <div>
+                    <div className="mb-4 flex items-center justify-between">
+                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--light-green)] text-xl text-[var(--dark-text)]">
+                        <Icon />
+                      </span>
+                      <span className="font-mono text-xs font-semibold text-[var(--light-text)]">
+                        0{i + 1} / 0{N}
+                      </span>
+                    </div>
+
+                    <h3 className="text-xl font-bold leading-tight tracking-tight text-[var(--dark-text)] sm:text-2xl lg:text-[1.75rem]">
+                      {ind.label}
+                    </h3>
+                    <p className="mt-2.5 text-sm leading-relaxed text-[var(--text-gray)] sm:text-base">
+                      {ind.desc}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-[var(--borders-color)] pt-4">
+                    <Link
+                      href={ind.href}
+                      onClick={(e) => e.stopPropagation()}
+                      className="group/link inline-flex items-center gap-2 text-sm font-semibold text-[var(--main-green)]"
                     >
-                      {word}
-                    </motion.span>
-                  ))}
-                </h3>
-
-                <p className="relative mt-3 text-sm leading-relaxed text-[var(--text-gray)] sm:text-base">
-                  {ind.desc}
-                </p>
-
-                <Link
-                  href={ind.href}
-                  className="group/link relative mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[var(--main-green)]"
-                >
-                  <span className="border-b border-[var(--main-green)]/40 pb-0.5 transition-colors group-hover/link:border-[var(--main-green)]">
-                    See how it works
-                  </span>
-                  <FiArrowRight className="transition-transform duration-300 group-hover/link:translate-x-1" />
-                </Link>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-
-          {/* Right: 3D Tilt + Hover Zoom Image Showcase */}
-          <div className="relative order-1 h-[260px] [perspective:1200px] sm:h-[330px] md:order-2 md:col-span-7 lg:h-[380px]">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={ind.id}
-                initial={reduce ? false : { opacity: 0, scale: 1.04, rotateY: -8 }}
-                animate={{ opacity: 1, scale: 1, rotateY: 0 }}
-                exit={reduce ? undefined : { opacity: 0, scale: 0.97 }}
-                transition={{ duration: 0.5, ease: EASE }}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleMouseLeave}
-                style={
-                  reduce
-                    ? undefined
-                    : {
-                        rotateX: rawTiltX,
-                        rotateY: rawTiltY,
-                        transformStyle: "preserve-3d",
-                      }
-                }
-                className="group relative h-full w-full overflow-hidden rounded-3xl border border-[var(--borders-color)] bg-[var(--color-primary)] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.16)]"
-              >
-                <Image
-                  src={IMG}
-                  alt={ind.label}
-                  fill
-                  sizes="(min-width: 768px) 58vw, 100vw"
-                  className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
-                />
-
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[var(--bg-color)]/75 via-black/10 to-transparent transition-opacity duration-500 group-hover:opacity-65" />
-
-                {/* Floating live label */}
-                <div className="pointer-events-none absolute bottom-3.5 left-3.5 right-3.5 flex items-center justify-between gap-2 rounded-2xl border border-black/10 bg-[var(--color-primary)]/95 px-4 py-2.5 text-[var(--dark-text)] shadow-sm backdrop-blur-md transition-transform duration-500 group-hover:-translate-y-0.5">
-                  <span className="inline-flex items-center gap-2 text-xs font-bold sm:text-sm">
-                    <span className="h-2 w-2 rounded-full bg-[var(--main-green)]" />
-                    {ind.label}
-                  </span>
-                  <span className="rounded-full bg-[var(--light-green)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--dark-text)]">
-                    Chatlivo Support
-                  </span>
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        </div>
-
-            {/* Full-Width Edge-to-Edge Interactive Timeline Strip */}
-        <div className="relative w-full overflow-hidden border-y border-[var(--borders-color)] bg-[var(--color-primary)]">
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-[var(--color-primary)] to-transparent sm:w-32" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[var(--color-primary)] to-transparent sm:w-32" />
-
-          <motion.div
-            className="flex w-max min-w-full"
-            animate={reduce ? undefined : { x: ["0%", "-33.33%"] }}
-            transition={{ duration: 30, ease: "linear", repeat: Infinity, repeatType: "loop" }}
-          >
-            {MARQUEE_ITEMS.map((x, i) => {
-              const logicalIndex = i % INDUSTRIES.length;
-              const isActive = active === logicalIndex;
-
-              return (
-                <button
-                  key={`${x.id}-${i}`}
-                  type="button"
-                  onClick={() => pick(logicalIndex)}
-                  aria-pressed={isActive}
-                  className={`group relative flex min-w-[150px] flex-col items-start justify-center border-r border-[var(--borders-color)] px-5 py-3 text-left transition-colors duration-300 last:border-none sm:min-w-[180px] sm:px-7 ${
-                    isActive ? "bg-[var(--bg-light)]" : "hover:bg-[var(--bg-color)]"
-                  }`}
-                >
-                  <span
-                    className={`mb-1 font-mono text-[10px] font-semibold transition-colors ${
-                      isActive ? "text-[var(--main-green)]" : "text-[var(--light-text)]"
-                    }`}
-                  >
-                    0{logicalIndex + 1}
-                  </span>
-
-                  <span
-                    className={`text-xs font-bold transition-colors whitespace-nowrap sm:text-sm ${
-                      isActive
-                        ? "text-[var(--dark-text)]"
-                        : "text-[var(--text-gray)] group-hover:text-[var(--dark-text)]"
-                    }`}
-                  >
-                    {x.label}
-                  </span>
-
-                  <div className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden bg-[var(--borders-color)]">
-                    {isActive && (
-                      <motion.div
-                        key={`prog-${x.id}-${running ? "run" : "static"}`}
-                        className="h-full origin-left bg-[var(--main-green)]"
-                        initial={{ scaleX: 0 }}
-                        animate={{ scaleX: 1 }}
-                        transition={running ? { duration: CYCLE / 1000, ease: "linear" } : { duration: 0.25 }}
-                      />
-                    )}
+                      <span className="border-b border-[var(--main-green)]/40 pb-0.5 transition-colors group-hover/link:border-[var(--main-green)]">
+                        See how it works
+                      </span>
+                      <FiArrowRight className="transition-transform duration-300 group-hover/link:translate-x-1" />
+                    </Link>
                   </div>
-                </button>
-              );
-            })}
-          </motion.div>
+                </div>
+              </article>
+            );
+          })}
         </div>
+      </div>
+
+      {/* Previous / Next hover pill */}
+      <div ref={pillRef} aria-hidden className="ind-pill-wrap pointer-events-none fixed left-0 top-0 z-[9999]">
+        <span
+          ref={pillTextRef}
+          data-on="false"
+          className="ind-pill block rounded-full bg-[var(--dark-text)] px-4 py-2 text-[11px] font-medium text-[var(--color-primary)] shadow-lg"
+        >
+          Next
+        </span>
       </div>
     </section>
   );

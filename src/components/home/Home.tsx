@@ -9,6 +9,8 @@ import Industries from "./sections/Industries";
 import Faq from "./sections/Faq";
 import FinalCta from "./sections/FinalCta";
 import Footer from "../layout/Footer";
+import BottomToTop from "../layout/BottomToTop";
+import CursorFollower from "../CursorFollower";
 
 export default function Home() {
   return (
@@ -26,6 +28,8 @@ export default function Home() {
         <FinalCta />           
       </main>
       <Footer />
+      <BottomToTop />
+      <CursorFollower />
     </div>
   );
 }

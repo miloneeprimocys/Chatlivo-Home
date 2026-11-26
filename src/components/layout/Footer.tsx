@@ -1,11 +1,10 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { motion, useScroll, useSpring, useTransform } from "framer-motion";
+import { motion, useMotionValue, useSpring } from "framer-motion";
 import { FaApple, FaFacebookF, FaGooglePlay, FaInstagram } from "react-icons/fa";
-import { FiArrowUp } from "react-icons/fi";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -85,10 +84,216 @@ const COLUMNS: { title: string; links: L[] }[] = [
   },
 ];
 
+/** Interactive background: dot matrix that reacts to cursor proximity + subtle signal ripples */
+function InteractiveNodeField({ footerRef }: { footerRef: React.RefObject<HTMLElement | null> }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pointer = useRef({ x: -9999, y: -9999, active: false });
+  const ripples = useRef<{ x: number; y: number; born: number }[]>([]);
+
+  useEffect(() => {
+    const footer = footerRef.current;
+    const canvas = canvasRef.current;
+    if (!footer || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const spacing = 28;
+    const influenceRadius = 155;
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+    let rafId = 0;
+
+    const resize = () => {
+      const rect = footer.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = rect.width;
+      height = rect.height;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(footer);
+
+    const onMove = (e: globalThis.MouseEvent) => {
+      const rect = footer.getBoundingClientRect();
+      pointer.current.x = e.clientX - rect.left;
+      pointer.current.y = e.clientY - rect.top;
+      pointer.current.active = true;
+    };
+
+    const onLeave = () => {
+      pointer.current.active = false;
+    };
+
+    const onClick = (e: globalThis.MouseEvent) => {
+      const rect = footer.getBoundingClientRect();
+      ripples.current.push({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        born: performance.now(),
+      });
+      if (ripples.current.length > 6) ripples.current.shift();
+    };
+
+    // Occasional gentle ambient pulse like an incoming message ping
+    const pingInterval = window.setInterval(() => {
+      if (width > 120 && height > 120) {
+        ripples.current.push({
+          x: width * (0.2 + Math.random() * 0.6),
+          y: height * (0.2 + Math.random() * 0.6),
+          born: performance.now(),
+        });
+        if (ripples.current.length > 6) ripples.current.shift();
+      }
+    }, 2800);
+
+    footer.addEventListener("mousemove", onMove);
+    footer.addEventListener("mouseleave", onLeave);
+    footer.addEventListener("click", onClick);
+
+    const render = (now: number) => {
+      ctx.clearRect(0, 0, width, height);
+
+      // Prune finished ripples
+      ripples.current = ripples.current.filter((r) => now - r.born < 1600);
+
+      const px = pointer.current.x;
+      const py = pointer.current.y;
+      const isActive = pointer.current.active;
+
+      const cols = Math.ceil(width / spacing) + 1;
+      const rows = Math.ceil(height / spacing) + 1;
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const baseX = col * spacing + 14;
+          const baseY = row * spacing + 14;
+
+          let drawX = baseX;
+          let drawY = baseY;
+          let energy = 0;
+
+          if (isActive) {
+            const dx = baseX - px;
+            const dy = baseY - py;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist < influenceRadius && dist > 0.001) {
+              const t = 1 - dist / influenceRadius;
+              const eased = t * t;
+              // Subtle magnetic attraction / gentle swirl offset
+              drawX += (dx / dist) * eased * 5;
+              drawY += (dy / dist) * eased * 5;
+              energy = Math.max(energy, eased);
+            }
+          }
+
+          for (const r of ripples.current) {
+            const age = now - r.born;
+            const progress = age / 1600;
+            const ringRadius = progress * 240;
+            const ringBand = 34;
+            const d = Math.abs(Math.hypot(baseX - r.x, baseY - r.y) - ringRadius);
+            if (d < ringBand) {
+              const wave = (1 - d / ringBand) * (1 - progress);
+              energy = Math.max(energy, wave * 0.85);
+            }
+          }
+
+          const radius = 1.15 + energy * 1.9;
+          const alpha = 0.14 + energy * 0.72;
+
+          if (energy > 0.12) {
+            ctx.fillStyle = `rgba(115, 195, 17, ${Math.min(1, alpha)})`;
+          } else {
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.75})`;
+          }
+
+          ctx.beginPath();
+          ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      rafId = requestAnimationFrame(render);
+    };
+
+    rafId = requestAnimationFrame(render);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearInterval(pingInterval);
+      ro.disconnect();
+      footer.removeEventListener("mousemove", onMove);
+      footer.removeEventListener("mouseleave", onLeave);
+      footer.removeEventListener("click", onClick);
+    };
+  }, [footerRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0 opacity-90 [mask-image:radial-gradient(ellipse_85%_80%_at_50%_45%,#000_45%,transparent_100%)]"
+    />
+  );
+}
+
+/** Gently pulls interactive controls toward the cursor */
+function MagneticPull({
+  children,
+  strength = 0.25,
+  className = "",
+}: {
+  children: ReactNode;
+  strength?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const sx = useSpring(x, { stiffness: 260, damping: 18, mass: 0.35 });
+  const sy = useSpring(y, { stiffness: 260, damping: 18, mass: 0.35 });
+
+  const handleMove = (e: MouseEvent<HTMLDivElement>) => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    x.set((e.clientX - (rect.left + rect.width / 2)) * strength);
+    y.set((e.clientY - (rect.top + rect.height / 2)) * strength);
+  };
+
+  const handleLeave = () => {
+    x.set(0);
+    y.set(0);
+  };
+
+  return (
+    <motion.div
+      ref={ref}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
+      style={{ x: sx, y: sy }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 function FooterLink({ href, children }: { href: string; children: string }) {
   return (
-    <Link href={href} className="group inline-flex items-center py-1 text-sm text-white/60 transition-colors hover:text-white">
-      <span className="relative after:absolute after:-bottom-0.5 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-[var(--main-light-green)] after:transition-transform after:duration-300 group-hover:after:scale-x-100">
+    <Link
+      href={href}
+      className="group inline-flex items-center gap-1.5 py-1 text-sm text-white/60 transition-colors duration-200 hover:text-white"
+    >
+      <span className="h-1.5 w-1.5 -translate-x-1 scale-0 rounded-full bg-[var(--main-light-green)] transition-all duration-200 group-hover:translate-x-0 group-hover:scale-100" />
+      <span className="relative transition-transform duration-200 group-hover:translate-x-0.5 after:absolute after:-bottom-0.5 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-[var(--main-light-green)] after:transition-transform after:duration-300 group-hover:after:scale-x-100">
         {children}
       </span>
     </Link>
@@ -97,58 +302,54 @@ function FooterLink({ href, children }: { href: string; children: string }) {
 
 function StoreButton({ href, icon: Icon, small, big }: { href: string; icon: typeof FaApple; small: string; big: string }) {
   return (
-    <Link
-      href={href}
-      className="group flex items-center gap-3 rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2.5 transition-[border-color,background-color,transform] duration-300 hover:-translate-y-0.5 hover:border-[var(--main-light-green)]/60 hover:bg-white/[0.07]"
-    >
-      <Icon className="text-xl text-white transition-colors group-hover:text-[var(--main-light-green)]" />
-      <span className="leading-tight">
-        <span className="block text-[10px] text-white/50">{small}</span>
-        <span className="block text-sm font-semibold text-white">{big}</span>
-      </span>
-    </Link>
+    <MagneticPull strength={0.22}>
+      <motion.div whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 360, damping: 22 }}>
+        <Link
+          href={href}
+          className="group flex items-center gap-3 rounded-xl border border-white/15 bg-black/70 px-4 py-2.5 backdrop-blur-xs transition-[border-color,background-color] duration-300 hover:border-[var(--main-light-green)]/75 hover:bg-white/[0.08]"
+        >
+          <Icon className="text-xl text-white transition-transform duration-300 group-hover:scale-110 group-hover:text-[var(--main-light-green)]" />
+          <span className="leading-tight">
+            <span className="block text-[10px] text-white/50">{small}</span>
+            <span className="block text-sm font-semibold text-white">{big}</span>
+          </span>
+        </Link>
+      </motion.div>
+    </MagneticPull>
   );
 }
 
 export default function Footer() {
-  const markRef = useRef<HTMLDivElement>(null);
-
-  // Wordmark fills with green as it scrolls into view
-  const { scrollYProgress: markP } = useScroll({ target: markRef, offset: ["start end", "end 80%"] });
-  const clip = useTransform(markP, [0, 1], ["inset(0 100% 0 0)", "inset(0 0% 0 0)"]);
-
-  // Back-to-top ring shows how far down the page you are
-  const { scrollYProgress: pageP } = useScroll();
-  const ring = useSpring(pageP, { stiffness: 120, damping: 28 });
-
-  const markStyle = { fontSize: "clamp(4rem, 17.5vw, 17rem)" };
+  const footerRef = useRef<HTMLElement>(null);
 
   return (
-    <footer className="relative overflow-hidden bg-black text-white">
-      {/* top glow line */}
-      <div aria-hidden className="absolute inset-x-0 top-0 h-px overflow-hidden">
+    <footer
+      ref={footerRef}
+      className="relative overflow-hidden bg-black text-white"
+    >
+      {/* Interactive dot-matrix node field + click/ambient signal ripples */}
+      <InteractiveNodeField footerRef={footerRef} />
+
+      {/* Top accent sweep */}
+      <div aria-hidden className="absolute inset-x-0 top-0 z-10 h-px overflow-hidden">
         <motion.span
           className="block h-full w-1/3 bg-gradient-to-r from-transparent via-[var(--main-light-green)] to-transparent"
           animate={{ x: ["-100%", "300%"] }}
           transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
         />
       </div>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-0 h-[300px] w-[70vw] max-w-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(115,195,17,0.16),transparent)] blur-2xl"
-      />
 
-      <div className="relative mx-auto max-w-7xl px-6 pt-16 sm:pt-20 lg:px-10">
+      <div className="relative z-10 mx-auto max-w-7xl px-6 pt-16 sm:pt-20 lg:px-10">
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-[1.7fr_repeat(6,minmax(0,1fr))]">
           {/* Brand */}
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.7, ease: EASE }}
+            viewport={{ once: false, amount: "some" }}
+            transition={{ duration: 0.65, ease: EASE }}
             className="col-span-2 sm:col-span-3 lg:col-span-1"
           >
-            <Link href="/" aria-label="Chatlivo home" className="inline-block">
+            <Link href="/" aria-label="Chatlivo home" className="inline-block transition-transform duration-300 hover:scale-[1.02]">
               <Image src="/images/logo.svg" alt="Chatlivo" width={172} height={32} className="h-8 w-auto" />
             </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/60">
@@ -163,14 +364,17 @@ export default function Footer() {
                 { icon: FaFacebookF, href: FACEBOOK, label: "Facebook" },
                 { icon: FaInstagram, href: INSTAGRAM, label: "Instagram" },
               ].map((s) => (
-                <Link
-                  key={s.label}
-                  href={s.href}
-                  aria-label={s.label}
-                  className="grid h-10 w-10 place-items-center rounded-full border border-white/15 text-base text-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-[var(--main-light-green)] hover:bg-[var(--main-light-green)] hover:text-black"
-                >
-                  <s.icon />
-                </Link>
+                <MagneticPull key={s.label} strength={0.35}>
+                  <motion.div whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.92 }} transition={{ type: "spring", stiffness: 420, damping: 20 }}>
+                    <Link
+                      href={s.href}
+                      aria-label={s.label}
+                      className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-black/70 text-base text-white/70 backdrop-blur-xs transition-colors duration-300 hover:border-[var(--main-light-green)] hover:bg-[var(--main-light-green)] hover:text-black"
+                    >
+                      <s.icon />
+                    </Link>
+                  </motion.div>
+                </MagneticPull>
               ))}
             </div>
           </motion.div>
@@ -182,8 +386,8 @@ export default function Footer() {
               aria-label={col.title}
               initial={{ opacity: 0, y: 24 }}
               whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-40px" }}
-              transition={{ duration: 0.7, delay: 0.08 * (ci + 1), ease: EASE }}
+              viewport={{ once: false, amount: "some" }}
+              transition={{ duration: 0.65, delay: 0.06 * (ci + 1), ease: EASE }}
             >
               <h3 className="mb-3 text-sm font-semibold text-white">{col.title}</h3>
               <ul className="flex flex-col">
@@ -197,47 +401,9 @@ export default function Footer() {
           ))}
         </div>
 
-        {/* Wordmark */}
-        <div ref={markRef} aria-hidden className="relative mt-16 select-none overflow-hidden text-center sm:mt-20">
-          <div
-            className="font-black leading-[0.9] tracking-tight text-transparent"
-            style={{ ...markStyle, WebkitTextStroke: "1px rgba(255,255,255,0.14)" }}
-          >
-            Chatlivo
-          </div>
-          <motion.div
-            style={{ ...markStyle, clipPath: clip }}
-            className="absolute inset-0 bg-gradient-to-b from-[var(--main-light-green)] to-[var(--main-green)] bg-clip-text font-black leading-[0.9] tracking-tight text-transparent"
-          >
-            Chatlivo
-          </motion.div>
-        </div>
-
         {/* Bottom bar */}
-        <div className="relative flex flex-col items-center justify-between gap-4 border-t border-white/10 py-6 sm:flex-row">
+        <div className="relative mt-4 flex flex-col items-center justify-between gap-4 border-t border-white/10 py-6 sm:mt-8 sm:flex-row">
           <p className="text-sm text-white/50">&copy; {new Date().getFullYear()} Chatlivo. All rights reserved.</p>
-
-          <button
-            type="button"
-            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            aria-label="Back to top"
-            className="group relative grid h-11 w-11 place-items-center rounded-full text-white/80 transition-colors hover:text-[var(--main-light-green)]"
-          >
-            <svg viewBox="0 0 44 44" className="absolute inset-0 -rotate-90">
-              <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="2" />
-              <motion.circle
-                cx="22"
-                cy="22"
-                r="20"
-                fill="none"
-                stroke="var(--main-light-green)"
-                strokeWidth="2"
-                strokeLinecap="round"
-                style={{ pathLength: ring }}
-              />
-            </svg>
-            <FiArrowUp className="relative transition-transform duration-300 group-hover:-translate-y-0.5" />
-          </button>
         </div>
       </div>
     </footer>

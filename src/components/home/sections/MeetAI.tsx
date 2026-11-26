@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -9,18 +9,22 @@ import {
   cubicBezier,
   motion,
   transform,
+  useInView,
   useMotionValue,
   useScroll,
   useSpring,
   useTransform,
 } from "framer-motion";
-import { FiArrowRight, FiCheck, FiCpu, FiGlobe, FiHelpCircle, FiUser } from "react-icons/fi";
+import { FiArrowRight, FiCheck, FiCpu, FiGlobe, FiHelpCircle, FiSend, FiUser, FiZap } from "react-icons/fi";
 import type { IconType } from "react-icons";
 
 type MV = MotionValue<number>;
 
-/** Put Image1.webp in /public/images (or change this path). */
-const IMG = "/images/Image1.webp";
+const SHOTS = [
+  { src: "/livoai/TrainAiHero.webp", label: "Website knowledge" },
+  { src: "/livoai/AiAssistant.webp", label: "Custom FAQs & rules" },
+  { src: "/livoai/AiHandoff.webp", label: "Smart human handoff" },
+];
 const SOFT = cubicBezier(0.22, 1, 0.36, 1);
 
 /* ------------------------------------------------------------------ */
@@ -43,27 +47,10 @@ function Count({ m, a, b, to }: { m: MV; a: number; b: number; to: number }) {
   return <motion.span>{s}</motion.span>;
 }
 
-/** Bubble whose text types out with scroll, without the bubble resizing while it types. */
-function TypedBubble({ m, a, b, text, className }: { m: MV; a: number; b: number; text: string; className: string }) {
-  const typed = useTransform(m, (v) => text.slice(0, Math.round(transform(v, [a, b], [0, text.length]))));
-  const dots = useTransform(m, [a - 0.06, a - 0.04, a - 0.005, a + 0.01], [0, 1, 1, 0]);
-  return (
-    <Reveal m={m} a={a - 0.06} b={a - 0.03} className={`${className} relative`}>
-      <span className="invisible block px-3 py-2">{text}</span>
-      <motion.span className="absolute inset-0 px-3 py-2">{typed}</motion.span>
-      <motion.span style={{ opacity: dots }} className="absolute left-3 top-1/2 flex -translate-y-1/2 gap-1">
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--dark-text)]" style={{ animationDelay: `${i * 150}ms` }} />
-        ))}
-      </motion.span>
-    </Reveal>
-  );
-}
-
 /* ------------------------------------------------------------------ */
-/* Full-width background: knowledge streams flowing into the agent     */
+/* Full-width background: soft shade + knowledge streams into the agent */
 /* ------------------------------------------------------------------ */
-const SOURCES = [0.09, 0.26, 0.44, 0.61, 0.79, 0.93]; // start heights as a fraction of section height
+const SOURCES = [0.09, 0.26, 0.44, 0.61, 0.79, 0.93];
 
 function Backdrop({ m, tRef }: { m: MV; tRef: React.RefObject<HTMLSpanElement | null> }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -77,7 +64,6 @@ function Backdrop({ m, tRef }: { m: MV; tRef: React.RefObject<HTMLSpanElement | 
       const box = boxRef.current;
       const t = tRef.current;
       if (!box || !t) {
-        // heading not mounted yet: retry for a few frames
         if (tries++ < 30) raf = requestAnimationFrame(measure);
         return;
       }
@@ -101,12 +87,8 @@ function Backdrop({ m, tRef }: { m: MV; tRef: React.RefObject<HTMLSpanElement | 
     window.addEventListener("resize", measure);
     document.fonts?.ready.then(measure);
 
-    // re-measure once the heading's entrance animation has finished (it starts shifted down)
-    const off = m.on("change", (v) => {
-      if (v > 0.05) {
-        measure();
-        off();
-      }
+    const off = m.on("change", () => {
+      measure();
     });
 
     return () => {
@@ -118,21 +100,39 @@ function Backdrop({ m, tRef }: { m: MV; tRef: React.RefObject<HTMLSpanElement | 
     };
   }, [tRef, m]);
 
-  const draw = useTransform(m, [0, 0.16], [0, 1]);
-  const flow = useTransform(m, [0.08, 0.22], [0, 0.65]);
-  const beamY = useTransform(m, [0, 0.32], ["0%", "100%"]);
-  const beamO = useTransform(m, [0, 0.04, 0.28, 0.34], [0, 0.6, 0.6, 0]);
+  // soft shade that drifts slowly with scroll
+  const b1x = useTransform(m, [0, 1], ["0%", "22%"]);
+  const b1y = useTransform(m, [0, 1], ["0%", "14%"]);
+  const b2x = useTransform(m, [0, 1], ["0%", "-18%"]);
+  const b2y = useTransform(m, [0, 1], ["0%", "-12%"]);
 
   const sx = g.w - 24;
 
   return (
-    <div ref={boxRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div
+      ref={boxRef}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 overflow-hidden bg-gradient-to-b from-[#f6faef] via-[#ecf4df] to-[#e1edcf]"
+    >
       <style>{`
         @keyframes ma-packet { to { stroke-dashoffset: -1; } }
         @media (prefers-reduced-motion: reduce) { .ma-packet { animation: none !important; } }
       `}</style>
 
-      <div className="absolute inset-0 [background-image:radial-gradient(color-mix(in_srgb,var(--color-primary)_14%,transparent)_1px,transparent_1.3px)] [background-size:28px_28px] [mask-image:linear-gradient(to_right,transparent,#000_20%,#000_80%,transparent)]" />
+      {/* drifting shade */}
+      <motion.div
+        style={{ x: b1x, y: b1y }}
+        className="absolute -left-40 -top-32 h-[560px] w-[560px] rounded-full bg-[var(--main-green)]/20 blur-[140px] 2xl:h-[720px] 2xl:w-[720px]"
+      />
+      <motion.div
+        style={{ x: b2x, y: b2y }}
+        className="absolute -bottom-40 -right-32 h-[560px] w-[560px] rounded-full bg-[var(--main-light-green)]/45 blur-[150px] 2xl:h-[720px] 2xl:w-[720px]"
+      />
+      {/* pale halo behind the chat + screenshots so they read clearly */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_55%_55%_at_72%_52%,rgba(255,255,255,0.6),transparent)]" />
+
+      {/* Light dot grid */}
+      <div className="absolute inset-0 [background-image:radial-gradient(rgba(47,106,5,0.10)_1px,transparent_1.3px)] [background-size:28px_28px] [mask-image:linear-gradient(to_right,transparent,#000_20%,#000_80%,transparent)]" />
 
       {g.w > 0 && (
         <svg
@@ -144,38 +144,36 @@ function Backdrop({ m, tRef }: { m: MV; tRef: React.RefObject<HTMLSpanElement | 
         >
           {SOURCES.map((f, i) => {
             const y = f * g.h;
-            const ey = g.ty + (i - 2.5) * 1.5; // tiny spread so lines don't overlap exactly
+            const ey = g.ty + (i - 2.5) * 1.5;
             const d = `M${sx} ${y} C ${g.tx + (sx - g.tx) * 0.65} ${y}, ${g.tx + (sx - g.tx) * 0.3} ${ey}, ${g.tx} ${ey}`;
             return (
               <g key={i}>
-                <motion.path d={d} fill="none" stroke="var(--main-green)" strokeOpacity={0.3} strokeWidth={1.2} style={{ pathLength: draw }} />
-                <motion.g style={{ opacity: flow }}>
+                <path d={d} fill="none" stroke="var(--main-green)" strokeOpacity={0.32} strokeWidth={1.25} />
+                <g opacity={0.75}>
                   <path
                     d={d}
                     pathLength={1}
                     fill="none"
-                    stroke="var(--main-light-green)"
-                    strokeOpacity={0.6}
+                    stroke="var(--main-green)"
+                    strokeOpacity={0.85}
                     strokeWidth={2.6}
                     strokeLinecap="round"
                     strokeDasharray="0.05 0.95"
                     className="ma-packet"
                     style={{ animation: `ma-packet ${5 + (i % 3) * 1.6}s linear ${-i * 1.1}s infinite` }}
                   />
-                </motion.g>
-                <circle cx={sx} cy={y} r={3.5} fill="var(--main-light-green)" />
+                </g>
+                <circle cx={sx} cy={y} r={3.5} fill="var(--main-green)" />
               </g>
             );
           })}
         </svg>
       )}
 
-      <motion.div style={{ top: beamY, opacity: beamO }}
-        className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-[var(--main-light-green)] to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black to-transparent" />
     </div>
   );
 }
+
 /* ------------------------------------------------------------------ */
 /* Steps                                                               */
 /* ------------------------------------------------------------------ */
@@ -191,36 +189,322 @@ function Step({ m, s, active, onClick }: { m: MV; s: (typeof STEPS)[number]; act
     <button
       type="button"
       onClick={onClick}
-      className={`relative flex items-center gap-2 overflow-hidden rounded-full border px-4 py-2 text-sm font-medium transition-colors duration-500 ${
+      className={`relative flex items-center gap-2 overflow-hidden rounded-full border px-4 py-2 text-sm font-medium transition-colors duration-500 2xl:px-5 2xl:py-2.5 2xl:text-base ${
         active
-          ? "border-[var(--main-light-green)] text-[var(--color-primary)]"
-          : "border-[var(--text-gray)] text-[var(--light-gray)] hover:border-[var(--light-gray)]"
+          ? "border-[var(--main-green)] text-[var(--dark-text)] bg-[var(--light-green)]/40"
+          : "border-[var(--borders-color)] text-[var(--text-gray)] hover:border-[var(--gray-border)] hover:text-[var(--dark-text)] bg-white"
       }`}
     >
-      <s.icon className={active ? "text-[var(--main-light-green)]" : ""} />
+      <s.icon className={active ? "text-[var(--main-green)]" : ""} />
       {s.label}
-      <motion.span style={{ scaleX: fill }} className="absolute inset-x-0 bottom-0 h-[2px] origin-left bg-[var(--main-light-green)]" />
+      <motion.span style={{ scaleX: fill }} className="absolute inset-x-0 bottom-0 h-[2px] origin-left bg-[var(--main-green)]" />
     </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Interactive chat: type your own, or let the demo type for you       */
+/* ------------------------------------------------------------------ */
+type Msg = { from: "user" | "ai" | "agent"; text: string };
+
+const KB: { k: string[]; a: string; human?: boolean }[] = [
+  { k: ["human", "agent", "person", "team member"], a: "Sure thing! Let me bring in someone from the team with everything we just talked about.", human: true },
+  { k: ["refund"], a: "You’re covered by our published refund policy. Want me to pull up the exact details for you?" },
+  { k: ["setup", "install", "fast"], a: "It’s super quick—just drop a small snippet on your site and you’re good to go in a few minutes." },
+  { k: ["free", "trial", "plan"], a: "Yep, there’s a free plan to get started right away—no credit card needed." },
+  { k: ["language", "multilingual"], a: "Yes! Visitors can chat in their own language and your team can reply comfortably too." },
+  { k: ["learn", "website", "train"], a: "Just connect your pages and FAQs—I’ll pick up your info and answer naturally in your voice." },
+  { k: ["weekend", "hours", "open"], a: "Here’s what our published support hours say about weekends—happy to help check anything else!" },
+];
+
+const AUTO = [
+  "How does Primo AI learn from my website?",
+  "What is your refund policy?",
+  "Can I talk to a human agent?",
+];
+
+const SUGGEST = [
+  "What is your refund policy?",
+  "How fast does setup take?",
+  "Do you offer a 14-day free trial?",
+  "Do you have a plan for a small team?",
+  "Is there a free plan available?",
+  "Can I talk to a human agent?",
+  "Do you support multiple languages?",
+  "How does Primo AI learn from my website?",
+];
+
+function ChatWidget({ active, play }: { active: number; play: boolean }) {
+  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const touched = useRef(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const later = (fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timers.current.push(id);
+  };
+
+  const send = useCallback((text: string) => {
+    const q = text.trim();
+    if (!q) return;
+    setMsgs((m) => [...m, { from: "user", text: q }]);
+    setInput("");
+    setBusy(true);
+    const low = q.toLowerCase();
+    const hit = KB.find((e) => e.k.some((w) => low.includes(w)));
+    later(() => {
+      setMsgs((m) => [
+        ...m,
+        { from: "ai", text: hit ? hit.a : "Let me check your help docs for that—and if it needs a closer look, I’ll loop in the team." },
+      ]);
+      setBusy(false);
+      if (hit?.human) later(() => setMsgs((m) => [...m, { from: "agent", text: "Alex joined the conversation" }]), 900);
+    }, 1100);
+  }, []);
+
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  const take = () => {
+    touched.current = true;
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+  };
+
+  // Demo: types one question per step until the visitor takes over
+  useEffect(() => {
+    if (!play || touched.current) return;
+    const q = AUTO[active];
+    let i = 0;
+    let id: ReturnType<typeof setTimeout>;
+    const type = () => {
+      if (touched.current) return;
+      i += 1;
+      setInput(q.slice(0, i));
+      if (i < q.length) id = setTimeout(type, 34);
+      else id = setTimeout(() => !touched.current && sendRef.current(q), 380);
+    };
+    id = setTimeout(type, 600);
+    return () => clearTimeout(id);
+  }, [active, play]);
+
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  return (
+    <div className="flex flex-col">
+      <style>{`
+        @keyframes ma-marq { to { transform: translateX(-50%); } }
+        .ma-marq { animation: ma-marq 46s linear infinite; }
+        .ma-marq:hover { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) { .ma-marq { animation: none; } }
+      `}</style>
+
+      <div className="flex items-center gap-2.5 border-b border-[var(--borders-color)] bg-[var(--main-light-green)] px-4 py-3 2xl:gap-3 2xl:px-5 2xl:py-4">
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-white text-sm text-[var(--dark-text)] 2xl:h-10 2xl:w-10 2xl:text-base">
+          <FiCpu />
+        </span>
+        <span className="leading-tight">
+          <span className="block text-sm font-semibold text-[var(--dark-text)] 2xl:text-base">Primo AI</span>
+          <span className="flex items-center gap-1.5 text-[11px] text-[var(--dark-text)]/70 2xl:text-xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--main-green)]" /> Online · Instant answers
+          </span>
+        </span>
+      </div>
+
+      <div className="flex h-[200px] flex-col justify-end gap-2 overflow-hidden bg-white px-4 py-3 2xl:h-[260px] 2xl:gap-2.5 2xl:px-5 2xl:py-4">
+        {msgs.length === 0 && !busy && (
+          <p className="mb-auto pt-2 text-center text-[11px] text-[var(--text-gray)] 2xl:text-xs">Ask anything about your business…</p>
+        )}
+        <AnimatePresence initial={false}>
+          {msgs.slice(-4).map((m, i) =>
+            m.from === "agent" ? (
+              <motion.div
+                key={`${msgs.length}-${i}`}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex w-fit items-center gap-2 self-center rounded-full border border-[var(--main-green)] bg-[var(--light-green)] px-3 py-1 text-[11px] font-semibold text-[var(--dark-text)] 2xl:px-3.5 2xl:py-1.5 2xl:text-xs"
+              >
+                <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--dark-text)] text-[9px] text-white 2xl:h-5 2xl:w-5 2xl:text-[10px]">A</span>
+                {m.text} <FiCheck />
+              </motion.div>
+            ) : (
+              <motion.div
+                key={`${msgs.length}-${i}`}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`w-fit max-w-[88%] rounded-2xl px-3 py-2 text-xs leading-relaxed 2xl:px-4 2xl:py-2.5 2xl:text-sm ${
+                  m.from === "user"
+                    ? "ml-auto rounded-br-sm bg-[var(--main-light-green)] text-[var(--dark-text)]"
+                    : "rounded-bl-sm border border-[var(--borders-color)] bg-[var(--bg-color)] text-[var(--dark-text)]"
+                }`}
+              >
+                {m.text}
+              </motion.div>
+            ),
+          )}
+          {busy && (
+            <motion.div
+              key="typing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex w-fit items-center gap-1 rounded-2xl rounded-bl-sm border border-[var(--borders-color)] bg-[var(--bg-color)] px-3 py-2.5 2xl:px-4 2xl:py-3"
+            >
+              {[0, 1, 2].map((d) => (
+                <span key={d} className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--main-green)] 2xl:h-2 2xl:w-2" style={{ animationDelay: `${d * 150}ms` }} />
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Or try asking */}
+      <div className="border-t border-[var(--borders-color)] bg-[var(--bg-color)] py-2 2xl:py-2.5">
+        <p className="mb-1.5 px-4 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-gray)] 2xl:px-5 2xl:text-[11px]">Or try asking</p>
+        <div className="overflow-hidden [mask-image:linear-gradient(to_right,transparent,#000_10%,#000_90%,transparent)]">
+          <div className="ma-marq flex w-max gap-2 pr-2">
+            {[...SUGGEST, ...SUGGEST].map((q, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  take();
+                  send(q);
+                }}
+                className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--borders-color)] bg-white px-3 py-1 text-[11px] text-[var(--dark-text)] transition-colors hover:border-[var(--main-green)] hover:bg-[var(--light-green)]/40 2xl:px-3.5 2xl:py-1.5 2xl:text-xs"
+              >
+                <FiZap className="text-[var(--main-green)]" />
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Input */}
+      <div className="flex items-center gap-2 border-t border-[var(--borders-color)] bg-white px-3 py-2.5 2xl:gap-2.5 2xl:px-4 2xl:py-3.5">
+        <input
+          value={input}
+          onChange={(e) => {
+            take();
+            setInput(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              take();
+              send(input);
+            }
+          }}
+          onFocus={take}
+          placeholder="Type your message here"
+          aria-label="Message Primo AI"
+          className="min-w-0 flex-1 rounded-full border border-[var(--main-green)]/60 bg-white px-4 py-2 text-xs text-[var(--dark-text)] outline-none transition-shadow placeholder:text-[var(--text-gray)] focus:shadow-[0_0_0_3px_rgba(115,195,17,0.2)] 2xl:px-5 2xl:py-2.5 2xl:text-sm"
+        />
+        <button
+          type="button"
+          aria-label="Send"
+          onClick={() => {
+            take();
+            send(input);
+          }}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--main-light-green)] text-sm text-[var(--dark-text)] transition-transform hover:scale-110 active:scale-95 2xl:h-10 2xl:w-10 2xl:text-base"
+        >
+          <FiSend />
+        </button>
+      </div>
+
+      <p className="border-t border-[var(--borders-color)] bg-[var(--bg-color)] px-4 py-2 text-center text-[10px] leading-snug text-[var(--text-gray)] 2xl:px-5 2xl:py-2.5 2xl:text-[11px] lg:text-right">
+        Example only. Actual replies depend on your business knowledge and configuration.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Screenshot card: placed cleanly without overlapping the chat box     */
+/* ------------------------------------------------------------------ */
+function ShotCard({ active, m }: { active: number; m: MV }) {
+  return (
+    <div className="relative z-10 mt-5 w-full max-w-[360px] sm:mt-6 sm:w-[62%] lg:mt-0 lg:w-[44%] lg:max-w-[340px] lg:self-end 2xl:w-[48%] 2xl:max-w-[460px]">
+      <motion.div
+        animate={{ y: [0, -5, 0] }}
+        transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <div className="rounded-2xl border border-white bg-white p-1.5 shadow-[0_30px_60px_-24px_rgba(47,106,5,0.45),0_8px_20px_-10px_rgba(0,0,0,0.15)] ring-1 ring-[var(--borders-color)] 2xl:rounded-3xl 2xl:p-2">
+          <div className="relative aspect-[8/5] overflow-hidden rounded-xl bg-[var(--bg-color)] 2xl:rounded-2xl">
+            <AnimatePresence initial={false}>
+              <motion.div
+                key={active}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+                className="absolute inset-0"
+              >
+                <Image
+                  src={SHOTS[active].src}
+                  alt={SHOTS[active].label}
+                  fill
+                  quality={95}
+                  sizes="(min-width: 1536px) 460px, (min-width: 1024px) 340px, 70vw"
+                  className="object-cover object-top"
+                />
+              </motion.div>
+            </AnimatePresence>
+
+            {/* scan line, restarts on every swap */}
+            <motion.span
+              key={`scan-${active}`}
+              aria-hidden
+              initial={{ top: "0%", opacity: 0 }}
+              animate={{ top: "100%", opacity: [0, 1, 1, 0] }}
+              transition={{ duration: 1.6, ease: "easeInOut" }}
+              className="absolute inset-x-0 z-10 h-0.5 bg-[var(--main-green)] shadow-[0_0_18px_var(--main-green)]"
+            />
+
+            <div className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-1.5 bg-gradient-to-t from-black/55 to-transparent p-2.5 pt-8 text-[10px] font-semibold 2xl:gap-2 2xl:p-3.5 2xl:pt-10 2xl:text-xs">
+              <span className="rounded-full bg-[var(--main-light-green)] px-2 py-0.5 text-[var(--dark-text)] 2xl:px-2.5 2xl:py-1">
+                <Count m={m} a={0.02} b={0.3} to={128} /> pages read
+              </span>
+              <Reveal m={m} a={0.36} b={0.5} y={6} className="rounded-full bg-white px-2 py-0.5 text-[var(--dark-text)] shadow-sm 2xl:px-2.5 2xl:py-1">
+                <Count m={m} a={0.36} b={0.6} to={24} /> FAQs
+              </Reveal>
+              <Reveal m={m} a={0.7} b={0.8} y={6} className="rounded-full bg-white px-2 py-0.5 text-[var(--dark-text)] shadow-sm 2xl:px-2.5 2xl:py-1">
+                Handoff on
+              </Reveal>
+            </div>
+          </div>
+        </div>
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={active}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="mt-2 pl-1 text-[11px] font-medium text-[var(--text-gray)] 2xl:mt-2.5 2xl:text-xs"
+          >
+            {SHOTS[active].label}
+          </motion.p>
+        </AnimatePresence>
+      </motion.div>
+    </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
 /* Section                                                             */
 /* ------------------------------------------------------------------ */
-const Q1 = "Do you offer support on weekends?";
-const A1 = "Here’s what our published support policy says about weekend availability…";
-const Q2 = "I need a custom arrangement.";
-const A2 = "That’s best handled by a team member. I can pass this conversation along.";
-
-const BUB_IN = "w-fit max-w-[88%] rounded-2xl rounded-bl-sm bg-[var(--bg-light)] px-3 py-2 text-xs";
-const BUB_OUT = "ml-auto w-fit max-w-[88%] rounded-2xl rounded-br-sm bg-[var(--main-light-green)] text-xs";
-
 export default function MeetAI() {
   const trackRef = useRef<HTMLElement>(null);
   const tRef = useRef<HTMLSpanElement>(null);
   const deskRef = useRef(true);
   const dv = useMotionValue(0);
   const [active, setActive] = useState(0);
+  const inView = useInView(trackRef, { amount: 0.25, once: true });
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
@@ -233,7 +517,6 @@ export default function MeetAI() {
     return () => mq.removeEventListener("change", on);
   }, [dv]);
 
-  // Desktop: pinned stage. Mobile: progress while the section crosses the screen.
   const pinned = useScroll({ target: trackRef, offset: ["start start", "end end"] }).scrollYProgress;
   const flowing = useScroll({ target: trackRef, offset: ["start 75%", "end 55%"] }).scrollYProgress;
   const raw = useTransform([pinned, flowing, dv], ([a, b]: number[]) => (deskRef.current ? a : b));
@@ -252,46 +535,40 @@ export default function MeetAI() {
     window.scrollTo({ top: top + [0.03, 0.42, 0.78][i] * (el.offsetHeight - window.innerHeight), behavior: "smooth" });
   };
 
-  // Image card: colour is revealed as the scan passes, then it keeps drifting
-  const reveal = useTransform(m, [0.02, 0.3], ["inset(0 0 100% 0)", "inset(0 0 0% 0)"]);
-  const scanTop = useTransform(m, [0.02, 0.3], ["0%", "100%"]);
-  const scanO = useTransform(m, [0.02, 0.06, 0.27, 0.32], [0, 1, 1, 0]);
-  const imgY = useTransform(m, [0, 1], [30, -40]);
   const chatRY = useTransform(m, [0, 0.3], [-9, 0]);
-  const emptyO = useTransform(m, [0.1, 0.28, 0.32], [1, 1, 0]);
 
   return (
-    <section ref={trackRef} className="relative bg-black text-[var(--color-primary)] lg:h-[300vh]">
+    <section ref={trackRef} className="relative bg-[#ecf4df] text-[var(--dark-text)] lg:h-[300vh]">
       <div className="relative overflow-hidden lg:sticky lg:top-0 lg:h-[100svh]">
         <Backdrop m={m} tRef={tRef} />
 
-        <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 py-20 lg:h-full lg:grid-cols-12 lg:gap-8 lg:px-10 lg:py-0">
+        <div className="relative mx-auto grid max-w-[88rem] items-center gap-12 px-6 py-20 lg:h-full lg:grid-cols-12 lg:gap-8 lg:px-10 lg:py-0 2xl:max-w-[104rem] 2xl:gap-12 2xl:px-14">
           {/* Copy */}
           <div className="lg:col-span-5">
             <Reveal m={m} a={-0.1} b={0.04} y={20}>
-              <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--text-gray)] px-3 py-1 text-xs font-medium text-[var(--light-gray)]">
-                <FiCpu className="text-[var(--main-light-green)]" /> New focus · Meet Primo AI
+              <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--borders-color)] bg-white px-3 py-1 text-xs font-medium text-[var(--text-label)] shadow-sm 2xl:px-3.5 2xl:py-1.5 2xl:text-sm">
+                <FiCpu className="text-[var(--main-green)]" /> New focus · Meet Primo AI
               </span>
-              <h2 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl">
+              <h2 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl text-[var(--dark-text)] cursor-scan-effect 2xl:text-6xl">
                 Meet Primo AI,{" "}
-                <span className="text-[var(--main-light-green)]">
+                <span className="text-[var(--main-green)]">
                   Your AI Customer Support Agen<span ref={tRef}>t</span>
                 </span>
               </h2>
-              <p className="mt-5 max-w-lg text-base leading-relaxed text-[var(--light-gray)]">
-                Give Primo AI the answers your business already has. Add your website content and FAQs, and let it
-                handle suitable questions, even when your team is away. When a conversation needs a person, your agents
-                can take over.
+              <p className="mt-5 max-w-lg text-base leading-relaxed text-[var(--text-gray)] 2xl:max-w-xl 2xl:text-lg">
+                Give Primo AI the answers your business already knows. Connect your website pages and FAQs so visitors
+                get clear, helpful answers anytime—and whenever a real person is needed, your team steps right in with
+                the full context.
               </p>
             </Reveal>
 
-            <div className="mt-7 flex flex-wrap gap-2.5">
+            <div className="mt-7 flex flex-wrap gap-2.5 2xl:gap-3">
               {STEPS.map((s, i) => (
                 <Step key={s.label} m={m} s={s} active={active === i} onClick={() => jump(i)} />
               ))}
             </div>
 
-            <div className="mt-5 h-6 text-sm text-[var(--light-gray)]" aria-live="polite">
+            <div className="mt-5 h-6 text-sm text-[var(--text-gray)] 2xl:text-base" aria-live="polite">
               <AnimatePresence mode="wait">
                 <motion.p
                   key={active}
@@ -301,77 +578,27 @@ export default function MeetAI() {
                   transition={{ duration: 0.3 }}
                   className="flex items-center gap-2"
                 >
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--main-light-green)]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--main-green)]" />
                   {STEPS[active].note}
                 </motion.p>
               </AnimatePresence>
             </div>
 
-            <Link href="/products/ai-agent" className="group mt-7 inline-flex items-center gap-2 font-semibold text-[var(--main-light-green)]">
+            <Link href="/products/ai-agent" className="group mt-7 inline-flex items-center gap-2 font-semibold text-[var(--main-green)] 2xl:text-lg">
               <span className="border-b-2 border-[var(--main-green)] pb-0.5">Discover Primo AI</span>
               <FiArrowRight className="transition-transform duration-300 group-hover:translate-x-1.5" />
             </Link>
           </div>
 
-          {/* Chat card + knowledge card */}
-          <div className="relative mx-auto h-[600px] w-full max-w-[600px] lg:col-span-7 lg:h-[560px] lg:max-w-none [perspective:1600px]">
+          {/* Screenshot card + chat card side-by-side so neither overlaps the other */}
+          <div className="relative mx-auto flex w-full max-w-[780px] flex-col items-center justify-end gap-6 lg:col-span-7 lg:h-[580px] lg:max-w-none lg:flex-row lg:items-center lg:gap-5 2xl:h-[720px] 2xl:max-w-[960px] 2xl:gap-7 [perspective:1600px]">
+            <ShotCard active={active} m={m} />
+
             <motion.div
               style={{ rotateY: chatRY }}
-              className="absolute right-0 top-0 w-[92%] max-w-[440px] overflow-hidden rounded-3xl bg-[var(--color-primary)] text-[var(--dark-text)] shadow-[0_40px_100px_-30px_rgba(115,195,17,0.45)] lg:right-[2%]"
+              className="w-full max-w-[420px] shrink-0 overflow-hidden rounded-3xl border border-[var(--borders-color)] bg-[var(--color-primary)] text-[var(--dark-text)] shadow-[0_24px_60px_-24px_rgba(47,106,5,0.3),0_0_40px_-10px_rgba(115,195,17,0.18)] lg:w-[54%] 2xl:w-[50%] 2xl:max-w-[500px]"
             >
-              <div className="flex items-center gap-2 border-b border-[var(--borders-color)] px-4 py-3 text-[11px] font-semibold text-[var(--text-gray)]">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--main-light-green)] text-xs text-[var(--dark-text)]">
-                  <FiCpu />
-                </span>
-                Example · Primo AI
-              </div>
-
-              <div className="relative flex h-[300px] flex-col justify-end gap-2.5 overflow-hidden px-4 py-4">
-                <motion.div style={{ opacity: emptyO }} className="absolute inset-x-4 top-5 space-y-2.5">
-                  {[70, 52, 84].map((w, i) => (
-                    <span key={i} className="block h-2.5 animate-pulse rounded-full bg-[var(--bg-light)]" style={{ width: `${w}%`, animationDelay: `${i * 200}ms` }} />
-                  ))}
-                  <span className="block pt-1 text-[11px] text-[var(--text-gray)]">Reading your website…</span>
-                </motion.div>
-
-                <Reveal m={m} a={0.3} b={0.37} className={BUB_IN}>{Q1}</Reveal>
-                <TypedBubble m={m} a={0.43} b={0.55} text={A1} className={BUB_OUT} />
-                <Reveal m={m} a={0.62} b={0.68} className={BUB_IN}>{Q2}</Reveal>
-                <TypedBubble m={m} a={0.74} b={0.86} text={A2} className={BUB_OUT} />
-                <Reveal m={m} a={0.88} b={0.95} s={0.9}
-                  className="flex w-fit items-center gap-2 self-center rounded-full border border-[var(--main-green)] bg-[var(--light-green)] px-3 py-1 text-[11px] font-semibold">
-                  <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--dark-text)] text-[9px] text-[var(--color-primary)]">A</span>
-                  Alex joined the conversation <FiCheck />
-                </Reveal>
-              </div>
-
-              <p className="border-t border-[var(--borders-color)] px-4 py-3 text-[11px] leading-snug text-[var(--text-gray)]">
-                Example only. Actual replies depend on your business knowledge and configuration.
-              </p>
-            </motion.div>
-
-            <motion.div style={{ y: imgY }} className="absolute bottom-0 left-0 z-10 w-[62%] max-w-[330px]">
-              <div className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-[var(--text-gray)] bg-[var(--text-label)] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.9)]">
-                <Image src={IMG} alt="" fill sizes="330px" className="object-cover opacity-40 grayscale" />
-                <motion.div style={{ clipPath: reveal }} className="absolute inset-0">
-                  <Image src={IMG} alt="Primo AI knowledge settings" fill sizes="330px" className="object-cover" />
-                </motion.div>
-                <motion.span style={{ top: scanTop, opacity: scanO }}
-                  className="absolute inset-x-0 h-0.5 bg-[var(--main-light-green)] shadow-[0_0_18px_var(--main-light-green)]" />
-
-                <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent p-3 pt-8 text-[10px] font-semibold">
-                  <span className="rounded-full bg-[var(--main-light-green)] px-2 py-0.5 text-[var(--dark-text)]">
-                    <Count m={m} a={0.02} b={0.3} to={128} /> pages read
-                  </span>
-                  <Reveal m={m} a={0.36} b={0.5} y={6} className="rounded-full bg-[var(--light-green)] px-2 py-0.5 text-[var(--dark-text)]">
-                    <Count m={m} a={0.36} b={0.6} to={24} /> FAQs
-                  </Reveal>
-                  <Reveal m={m} a={0.7} b={0.8} y={6} className="rounded-full bg-[var(--color-primary)] px-2 py-0.5 text-[var(--dark-text)]">
-                    Handoff on
-                  </Reveal>
-                </div>
-              </div>
-              <p className="mt-2 pl-1 text-[11px] font-medium text-[var(--light-gray)]">Primo AI knowledge settings</p>
+              <ChatWidget active={active} play={inView} />
             </motion.div>
           </div>
         </div>

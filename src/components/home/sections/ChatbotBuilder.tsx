@@ -180,7 +180,7 @@ export default function ChatbotBuilder() {
           >
             <FiGitBranch /> Chatbot builder
           </motion.span>
-          <h2 className="mt-4 text-3xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl">
+          <h2 className="mt-4 text-3xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl cursor-scan-effect">
             <Words text="AI Chatbot Builder for Customer" show={headIn} />
             <Words text="Support, Lead Generation &" show={headIn} delay={0.15} />
             <Words text="Automation" show={headIn} grad delay={0.3} />
