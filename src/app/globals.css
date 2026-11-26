@@ -1,26 +1,83 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-primary: #ffffff;
+  --color-secondary: #000000;
+  --borders-color: #DCDCDC;
+  --gray-border: #C3C3C3;
+  --light-green: #D7F4B3;
+  --red: #E81332;
+  --dark-text: #000000;
+  --light-text: #a4a4a4;
+  --main-green: #73C311;
+  --main-light-green: #B9FA6A;
+  --medium-green: #6EC900;
+  --bg-gray: #868686;
+  --bg-light: #F5F5F5;
+  --bg-color: #F7F7F7;
+  --text-gray: #666666;
+  --subtitle-text: #686480;
+  --light-gray: #B7B7B7;
+  --placeholder-color: #BBBBBB;
+  --node-Background: #F8F8F8;
+  --text-label: #2C2B33;
+  --background-gray: #F9F9F9;
+  --gradient-button: linear-gradient(180deg, #2746B5 0%, #3F67F4 100%);
+  --gradient-stroke: linear-gradient(90deg, #2848B9 0%, rgba(61, 100, 238, 0.05) 100%);
+
+  --background: #000000;
+  --foreground: #ffffff;
 }
 
+/* Lets Tailwind generate utilities like bg-main-green, text-light-text, etc. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-main-green: var(--main-green);
+  --color-main-light-green: var(--main-light-green);
+  --color-medium-green: var(--medium-green);
+  --color-light-green: var(--light-green);
+  --color-brand-red: var(--red);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--main-light-green);
+  color: #000;
+}
+
+/* Required by Lenis for smooth scrolling to work correctly */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }
